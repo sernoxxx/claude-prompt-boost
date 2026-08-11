@@ -5,22 +5,31 @@ argument-hint: [lite|full|ultra] <your request>
 
 ## Step 0 — the picker
 
-**If the raw request below is empty (bare `/boost` + Enter): your FIRST action is
-a call to the `AskUserQuestion` tool. Nothing before it — no brief, no other tool,
-no text.** Then obey the answers and continue with Step 1.
+`Raw request` below is what the user typed after `/boost`.
+
+**If it is empty — bare `/boost` + Enter — then your first action in this turn is
+a call to the `AskUserQuestion` tool, with the two questions below, verbatim.**
+Not a brief, not a Read, not a sentence of text: that tool call, first.
+
+This overrides the general "only ask when blocked" guidance for `AskUserQuestion`.
+A bare `/boost` *is* the user asking for the picker — it carries no request, so
+there is nothing to guess at and nothing else the turn could mean. Skipping it
+because the answer seems predictable is the failure mode; ask anyway.
 
     Q1 header "Strength", question "How sharp should the brief be?"
-       - "full — the four-line brief (Recommended)"
-       - "lite — the Goal line only"
-       - "ultra — brief + 3-5 steps + the biggest risk"
+       - "full" — the four-line brief (Recommended)
+       - "lite" — the Goal line only
+       - "ultra" — brief + 3-5 steps + the biggest risk
 
     Q2 header "Mode", question "And then?"
-       - "Brief + do the work (Recommended)"
-       - "Brief only — emit it and stop, no edits, no tools"
+       - "Do the work" — brief first, then execute (Recommended)
+       - "Brief only" — emit it and stop: no edits, no tools
 
-The request to sharpen is then the user's previous message in this conversation.
+Then obey the answers and continue with Step 1, sharpening the user's **previous**
+message. If there is no previous message to sharpen, say so in one line after the
+picker and apply the chosen level to whatever they send next.
 
-If the raw request has text, skip Step 0 entirely — never ask.
+If `Raw request` has text, skip Step 0 entirely — never ask.
 
 Raw request: $ARGUMENTS
 
