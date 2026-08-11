@@ -39,7 +39,8 @@ That gives you the `/boost` command and the automatic hook.
 /boost ultra <your request>    # brief + 3-5 numbered steps + biggest risk
 ```
 
-Leave the request empty and it sharpens your previous message instead.
+Leave the request empty (bare `/boost` + Enter) and it opens an arrow-key
+picker for strength and mode, then sharpens your previous message.
 
 ### The four lines
 

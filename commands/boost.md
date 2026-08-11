@@ -8,6 +8,21 @@ Raw request: $ARGUMENTS
 If it is empty, use the user's last message in this conversation instead.
 If it starts with `lite`, `full` or `ultra`, that word is the level, not part of the request.
 
+## Step 0 — pick the settings
+
+Only when the raw request is empty (bare `/boost` + Enter): before anything else,
+call `AskUserQuestion` once with these two questions, then obey the answers.
+If the raw request has text, skip this step entirely — never ask.
+
+    Q1 header "Strength", question "How sharp should the brief be?"
+       - "full — the four-line brief (Recommended)"
+       - "lite — the Goal line only"
+       - "ultra — brief + 3-5 steps + the biggest risk"
+
+    Q2 header "Mode", question "And then?"
+       - "Brief + do the work (Recommended)"
+       - "Brief only — emit it and stop, no edits, no tools"
+
 ## Step 1 — sharpen
 
 Emit only the lines that carry information. Drop the ones you have nothing to put in.
