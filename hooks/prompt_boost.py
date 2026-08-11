@@ -5,14 +5,14 @@ The hook only ever shapes how the request is read. It says nothing about tone,
 format, length, verbosity or how to work - answers come out exactly as they
 would have without it.
 
-What happens when you hit enter:
+What happens when you hit enter with `/boost <prompt>` (or `/boost-mini
+<prompt>`, which forces the grammar-only mode for that one prompt):
 
     your prompt  ->  rewritten by a second model  ->  the original is blocked,
-    the session is cleared, and the rewrite lands in your input box
+    and the rewrite lands in your input box in the same session
 
 Nothing is sent until you press enter yourself, so you always see and can edit
-the request the model will actually get. It starts from a cleared session, so
-the boosting never ends up in the context.
+the request the model will actually get.
 
 Settings live in ~/.claude/boost.json and are only ever changed by the `/boost`
 picker - one way to set this up, not three.
@@ -40,11 +40,6 @@ DEFAULTS = {
     "timeout": 25,
     "max_tokens": 600,
 }
-
-# Handing text to a live TUI is a timing game: too early and it lands in the old
-# session, too late and you sit in front of an empty box. Tune here.
-CLEAR_DELAY_MS = 900      # let the blocked prompt settle, then clear
-TYPE_DELAY_MS = 2500      # let the fresh session come up, then hand over the text
 
 # Acknowledgements, corrections and other non-briefs: nothing to rewrite.
 CHATTER = re.compile(
@@ -89,16 +84,30 @@ RULES = (
 )
 
 
-def skip(prompt: str) -> bool:
-    """True when the prompt is not a work request worth rewriting."""
+# /boost-mini forces the grammar-only mode for one prompt, settings untouched.
+PREFIXES = (("/boost-mini ", "mini"), ("/boost ", None))
+
+
+def strip_prefix(prompt: str):
+    """The request behind the /boost prefix and the mode it forces, or None."""
     p = prompt.strip()
-    if not p or p[0] in "/!#":       # slash command, bash passthrough, memory note
+    for prefix, mode in PREFIXES:
+        if p.startswith(prefix):
+            return p[len(prefix):], mode
+    return None
+
+
+def skip(prompt: str) -> bool:
+    """True when the prompt is not a /boost work request worth rewriting."""
+    hit = strip_prefix(prompt)
+    if hit is None:
         return True
-    if len(p.split()) < 3:           # "fix it", "run tests": nothing to sharpen
+    actual = hit[0]
+    if len(actual.split()) < 3:
         return True
-    if p.rstrip().endswith("?"):     # a question wants an answer, not a brief
+    if actual.rstrip().endswith("?"):
         return True
-    return bool(CHATTER.match(p))
+    return bool(CHATTER.match(actual))
 
 
 def config() -> dict:
@@ -208,7 +217,7 @@ def keys_escape(text: str) -> str:
 
 
 def hand_to_input_box(text: str) -> bool:
-    """Clear the session, then put the rewrite in the input box, unsent.
+    """Put the rewrite in the input box, unsent.
 
     No hook output can fill that box, so this goes the way you would: the same
     key events, sent to the foreground window - the terminal you just hit enter
@@ -228,10 +237,7 @@ def hand_to_input_box(text: str) -> bool:
                              capture_output=True, text=True).stdout.strip()
         subprocess.Popen(
             [POWERSHELL, "-NoProfile", "-Command",
-             f"Start-Sleep -Milliseconds {CLEAR_DELAY_MS};"
-             "$w = New-Object -ComObject wscript.shell;"
-             "$w.SendKeys('/clear{ENTER}');"
-             f"Start-Sleep -Milliseconds {TYPE_DELAY_MS};"
+             f"$w = New-Object -ComObject wscript.shell;"
              f"$w.SendKeys([IO.File]::ReadAllText('{win}'));"
              f"Remove-Item -LiteralPath '{win}'"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -278,11 +284,14 @@ Finally tell the user in one line what is now set. Nothing more."""
 def selftest() -> None:
     global CONFIG                    # never write the real settings from a test
     CONFIG = os.path.join(tempfile.gettempdir(), "boost-selftest.json")
-    for p in ("", "ok", "/boost ultra", "what does this function do?",
-              "danke, das passt so", "fix it"):
+    for p in ("", "/boost ultra", "/boost was ist das?", "danke, das passt so", "/boost fix it"):
         assert skip(p), p
-    for p in ("make the dashboard better", "clean up the parser and speed it up"):
+    for p in ("/boost make the dashboard better", "/boost clean up the parser and speed it up",
+              "/boost-mini fix the parser bug"):
         assert not skip(p), p
+    assert strip_prefix("/boost-mini fix the parser") == ("fix the parser", "mini")
+    assert strip_prefix("/boost fix the parser") == ("fix the parser", None)
+    assert strip_prefix("/boosted thing") is None
 
     assert "AskUserQuestion" in PICKER
     assert "self" not in PICKER.split('Q3')[1]     # one rewriter question, no self
@@ -318,17 +327,22 @@ def main() -> None:
 
     prompt = json.load(sys.stdin).get("prompt", "")
     cfg = config()
-    if cfg["level"] == "off" or skip(prompt) or os.environ.get("BOOST_CHILD"):
+    if cfg["level"] == "off" or os.environ.get("BOOST_CHILD"):
         return
-    sharper = (rewrite if os.environ.get("ANTHROPIC_API_KEY") else cli_rewrite)(prompt, cfg)
+    hit = strip_prefix(prompt)
+    if hit is None or skip(prompt):
+        return
+    actual_prompt, forced = hit
+    if forced:
+        cfg = {**cfg, "mode": forced}
+    sharper = (rewrite if os.environ.get("ANTHROPIC_API_KEY") else cli_rewrite)(actual_prompt, cfg)
     if not sharper:                  # rewriter down: let the original through
         return
     if not hand_to_input_box(sharper):
         return print(f"<boosted-prompt>\n{sharper}\n</boosted-prompt>")
     print(json.dumps({
         "decision": "block",
-        "reason": "Boosted. Fresh session, and the rewrite is waiting in your"
-                  " input box - press enter to send it:\n\n" + sharper,
+        "reason": "Boosted. The rewrite is waiting in your input box - press enter to send it:\n\n" + sharper,
     }))
 
 

@@ -48,17 +48,20 @@ answering the request or asking clarifying questions instead of rewriting it —
 /plugin install prompt-boost
 ```
 
-That gives you the `/boost` command and the hook that runs on every prompt.
+That gives you the `/boost` and `/boost-mini` commands and the
+`/boost <prompt>` shortcut.
 
 ## Use
 
 ```
-/boost      the picker: strength, kind, rewriter
+/boost                 the picker: strength, kind, rewriter
+/boost <prompt>        rewrite this prompt and drop it in your input box
+/boost-mini <prompt>   same, but grammar and sentence structure only
 ```
 
-That is the only way in. There is no `/boost ultra`, no keyword in front of your
-prompt, no setting to find in Claude's own config — one command, three
-arrow-key questions, saved and applied to every prompt from then on. Turn it off
+The picker is the only way to change settings. There is no `/boost ultra`, no
+keyword in front of your prompt, no setting to find in Claude's own config —
+one command, three arrow-key questions, saved and applied to every prompt from then on. Turn it off
 in the same picker (`Strength → off`).
 
 ## Settings
@@ -92,7 +95,7 @@ the file.
 | `rewrite` | A precise request naming the target and the artifact that should exist afterwards |
 | `brief` | `Goal:` / `Done:` / `Assume:` / `Not:` — what to do, the check that proves it, the gap it filled, the scope fence |
 | `context` | The same request with the implicit parts spelled out |
-| `mini` | The same request, only with grammar and sentence structure cleaned up — nothing added, no gaps filled (`level` is ignored) |
+| `mini` | The same request, only with grammar and sentence structure cleaned up — nothing added, no gaps filled (`level` is ignored). `/boost-mini <prompt>` forces this for one prompt without changing the saved mode |
 
 ## What it does not do
 
@@ -103,15 +106,15 @@ model how to behave.
 
 ## The hook
 
-The plugin installs a `UserPromptSubmit` hook so you never have to remember to
-type anything. It skips what has nothing to sharpen: slash commands, one-liners,
-questions, and acknowledgements like *"ok"* or *"thanks"*.
+The plugin installs a `UserPromptSubmit` hook that only fires when you explicitly
+type `/boost <prompt>` or `/boost-mini <prompt>`. It skips everything else —
+slash commands, one-liners, questions, acknowledgements, and plain prompts.
 
-For everything else it blocks the prompt, clears the session and hands the
-rewrite to your input box the only way a terminal accepts text from outside: as
-the same key events you would have typed, sent to the window in front. That part
-is Windows/WSL only — anywhere else the rewrite is passed to the model inline
-instead, the way it worked before.
+For `/boost <prompt>` it rewrites the text, keeps your current session intact,
+and hands the rewrite to your input box the only way a terminal accepts text
+from outside: as the same key events you would have typed, sent to the window in
+front. That part is Windows/WSL only — anywhere else the rewrite is passed to
+the model inline instead, the way it worked before.
 
 ```
 python3 hooks/prompt_boost.py --selftest
