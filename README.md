@@ -1,10 +1,10 @@
-# prompt-boost
+# claude-prompt-boost
 
 Most bad agent output starts with a bad brief. You type *"clean up the parser"*,
 the model picks one of five readings, and you find out which one after it has
 rewritten a file you liked.
 
-`prompt-boost` sharpens the request before you send it. That is the whole
+`claude-prompt-boost` sharpens the request before you send it. That is the whole
 feature. It shapes how your request is read and nothing else — it says nothing
 about tone, format, length, verbosity or how to work. Your model answers exactly
 as it always would, just to a better question.
@@ -44,8 +44,8 @@ answering the request or asking clarifying questions instead of rewriting it —
 ## Install
 
 ```
-/plugin marketplace add sernoxxx/prompt-boost
-/plugin install prompt-boost
+/plugin marketplace add sernoxxx/claude-prompt-boost
+/plugin install claude-prompt-boost
 ```
 
 That gives you the `/boost` and `/boost-mini` commands and the

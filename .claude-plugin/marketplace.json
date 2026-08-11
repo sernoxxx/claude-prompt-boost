@@ -1,11 +1,11 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "prompt-boost",
+  "name": "claude-prompt-boost",
   "description": "Sharpen the brief before you start. Goal, done-check, assumption, scope fence.",
   "owner": { "name": "sernoxxx", "url": "https://github.com/sernoxxx" },
   "plugins": [
     {
-      "name": "prompt-boost",
+      "name": "claude-prompt-boost",
       "description": "Turns a vague request into a checkable brief before any work starts.",
       "source": "./",
       "category": "productivity"

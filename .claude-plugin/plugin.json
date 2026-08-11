@@ -1,13 +1,13 @@
 {
-  "name": "prompt-boost",
+  "name": "claude-prompt-boost",
   "version": "4.0.0",
   "description": "Rewrites your prompt before the model sees it, on your Claude subscription - no API key. Shapes nothing else about the answer.",
   "author": {
     "name": "sernoxxx",
     "url": "https://github.com/sernoxxx"
   },
-  "homepage": "https://github.com/sernoxxx/prompt-boost",
-  "repository": "https://github.com/sernoxxx/prompt-boost",
+  "homepage": "https://github.com/sernoxxx/claude-prompt-boost",
+  "repository": "https://github.com/sernoxxx/claude-prompt-boost",
   "license": "MIT",
   "keywords": [
     "prompt",
