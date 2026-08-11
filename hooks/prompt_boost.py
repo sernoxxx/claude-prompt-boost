@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: sharpens the user's request, and nothing else.
+"""UserPromptSubmit hook: rewrites the user's prompt. Nothing else.
+
+A model rewrites the request into a sharper version of itself, and that
+rewritten text is all the hook emits. It never tells the answering model how
+to work, what to print, or how to write - there is no instruction in the
+output at all, only the improved prompt.
 
 Settings live in ~/.claude/boost.json and are read fresh on every prompt:
 
-    {"level": "full", "mode": "brief", "style": "", "model": "self", "show": false}
+    {"level": "full", "mode": "rewrite", "style": "", "model": "claude-haiku-4-5"}
 
-    level  off | lite | full | ultra   how hard to sharpen
-    mode   brief | rewrite | context   what kind of sharpening
-    style  free text                   appended to the instruction
-    model  self | <anthropic model id> who rewrites; "self" adds no API call
-    show   false | true                print the sharpened reading
+    level  off | lite | full | ultra    how far to push the rewrite
+    mode   rewrite | brief | context    what the rewrite turns into
+    style  free text                    extra steering for the rewriter
+    model  an Anthropic model id        who rewrites
 
-With model "self" (the default) nothing extra runs: the main model reads its
-own request more carefully. With a model id the prompt is rewritten through
-the Anthropic API, which needs ANTHROPIC_API_KEY in the environment.
-
-Nothing here touches how the answer is written - only how the request is read.
+Needs ANTHROPIC_API_KEY in the environment. Without it - or if the call fails,
+times out, or returns nothing - the hook prints nothing and your prompt reaches
+the model exactly as you typed it.
 
 Self-check: python3 prompt_boost.py --selftest
 """
@@ -23,20 +25,21 @@ import json
 import os
 import re
 import sys
+import tempfile
 import urllib.request
 
 CONFIG = os.path.expanduser("~/.claude/boost.json")
+SELF = os.path.abspath(__file__)
 DEFAULTS = {
     "level": "full",
-    "mode": "brief",
+    "mode": "rewrite",
     "style": "",
-    "model": "self",
-    "show": False,
-    "timeout": 8,
-    "max_tokens": 400,
+    "model": "claude-haiku-4-5",
+    "timeout": 12,
+    "max_tokens": 600,
 }
 
-# Acknowledgements, corrections and other non-briefs: nothing to sharpen.
+# Acknowledgements, corrections and other non-briefs: nothing to rewrite.
 CHATTER = re.compile(
     r"^\s*(ok(ay)?|ja|yes|no|nope|nein|yep|sure|weiter|go|continue|thx|thanks|"
     r"danke|stop|wait|warte|hm+|nice|perfect|passt)\b",
@@ -44,31 +47,40 @@ CHATTER = re.compile(
 )
 
 MODES = {
-    "brief": "state it to yourself as Goal / Done / Assume / Not lines",
-    "rewrite": "restate it as one precise sentence naming the target and the artifact",
-    "context": "name what it leaves implicit: the file or area it points at, "
-    "and what would count as done",
+    "rewrite": "Rewrite it as a precise request: name the target (file, area,"
+    " component) and the artifact that should exist afterwards.",
+    "brief": "Rewrite it as a brief with the lines Goal / Done / Assume / Not:"
+    " what to do, the check that proves it, the gap you filled, the adjacent"
+    " scope left out. Drop any line you have nothing to put in.",
+    "context": "Rewrite it with what it leaves implicit spelled out: which"
+    " file or area it points at, and what would count as done.",
 }
 
 LEVELS = {
-    "lite": " Keep it to one line.",
-    "full": "",
-    "ultra": " Also name the biggest risk in the request and the one thing"
-    " that would show your reading is wrong.",
+    "lite": "Keep it to one sentence. Change as little as possible.",
+    "full": "Make every gap you fill explicit as an assumption.",
+    "ultra": "Make every gap you fill explicit as an assumption, and add the"
+    " single biggest risk in the request.",
 }
 
-QUIET = """
-Do this silently, as your own reading of the request. It is not part of your
-answer: do not print it, and do not let it change your tone, format, length,
-or how you work. Answer exactly as you would have without this note."""
+RULES = (
+    "You rewrite prompts. The user's message is a request they are about to"
+    " send to a coding agent, and your output replaces it verbatim.\n"
+    "Output the rewritten request and nothing else: no preamble, no"
+    " commentary, no quotes around it, no explanation of what you changed.\n"
+    "Keep the user's language, intent and scope. Do not answer the request,"
+    " do not solve it, and do not add instructions about how the answer should"
+    " be written, formatted or toned - you are improving the question, not"
+    " shaping the reply.\n"
+    "If a detail is missing, fill it with the most likely reading and mark it"
+    " as an assumption rather than asking."
+)
 
-LOUD = """
-Put it in the first lines of your answer, then do the work. Nothing else about
-your tone, format, length or process changes."""
+LEVEL_WORDS = ("off", "on", "lite", "full", "ultra")
 
 
 def skip(prompt: str) -> bool:
-    """True when the prompt is not a work request worth sharpening."""
+    """True when the prompt is not a work request worth rewriting."""
     p = prompt.strip()
     if not p or p[0] in "/!#":       # slash command, bash passthrough, memory note
         return True
@@ -91,46 +103,29 @@ def config() -> dict:
         pass
     if cfg["mode"] not in MODES:
         cfg["mode"] = DEFAULTS["mode"]
+    if cfg["model"] == "self":       # v2 setting; there is no self-rewrite now
+        cfg["model"] = DEFAULTS["model"]
     if cfg["level"] not in LEVELS and cfg["level"] != "off":
         cfg["level"] = DEFAULTS["level"]
     return cfg
 
 
-def self_block(cfg: dict) -> str:
-    style = f" {cfg['style'].strip()}" if cfg.get("style") else ""
-    tail = LOUD if cfg.get("show") else QUIET
-    return (
-        "<prompt-boost>\n"
-        f"Sharpen the user's request before acting on it: {MODES[cfg['mode']]}."
-        f"{LEVELS[cfg['level']]}{style}\n{tail}\n</prompt-boost>"
-    )
-
-
-def api_block(sharpened: str, cfg: dict) -> str:
-    return (
-        "<prompt-boost>\n"
-        f"A sharpened reading of the user's request, written by {cfg['model']}"
-        " and not by the user:\n\n"
-        f"{sharpened}\n\n"
-        "Use it as your reading of the request. Where it and the user's own"
-        " message differ, the user's message wins. Your tone, format, length"
-        " and process are unaffected by this note.\n</prompt-boost>"
-    )
+def save(**fields) -> dict:
+    cfg = config()
+    cfg.update(fields)
+    with open(CONFIG, "w") as f:
+        json.dump(cfg, f, indent=2)
+    return cfg
 
 
 def rewrite(prompt: str, cfg: dict):
-    """Rewrite the prompt through the API. None on any failure - prompt stays as typed."""
+    """The rewritten prompt, or None on any failure - caller then stays silent."""
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         return None
-    system = (
-        f"Rewrite the user's request so it is precise: {MODES[cfg['mode']]}."
-        f"{LEVELS[cfg['level']]} {cfg.get('style', '')}\n"
-        "Output only the rewritten request. Add no commentary, no preamble, and"
-        " no instructions about how an answer should be written. Keep the"
-        " user's language and intent; fill gaps with the most likely reading"
-        " and mark each one as an assumption."
-    )
+    system = "\n".join(
+        [RULES, MODES[cfg["mode"]], LEVELS[cfg["level"]], cfg.get("style", "")]
+    ).strip()
     body = json.dumps({
         "model": cfg["model"],
         "max_tokens": cfg["max_tokens"],
@@ -155,40 +150,106 @@ def rewrite(prompt: str, cfg: dict):
         return None
 
 
+# --- /boost command ------------------------------------------------------
+
+PICKER = f"""BOOST SETTINGS PICKER
+
+Call the `AskUserQuestion` tool RIGHT NOW, as the very first thing you do, with
+exactly the three questions below. Write no text before the tool call. The user
+typed a bare `/boost`, which is a request for this picker - asking is correct
+even when the answer looks predictable.
+
+Q1 header "Strength", question "How far should your prompts be rewritten?"
+   - "full" - fill gaps and mark them as assumptions (Recommended)
+   - "lite" - one sentence, change as little as possible
+   - "ultra" - full, plus the biggest risk in the request
+   - "off" - stop rewriting
+
+Q2 header "Kind", question "Rewritten into what?"
+   - "rewrite" - a precise request naming target and artifact (Recommended)
+   - "brief" - Goal / Done / Assume / Not
+   - "context" - the same request with the implicit parts spelled out
+
+Q3 header "Model", question "Which model rewrites the prompt?"
+   - "claude-haiku-4-5" - fastest and cheapest (Recommended)
+   - "claude-sonnet-5" - stronger, slower, pricier
+   - "claude-opus-5" - strongest, slowest, priciest
+
+Then save all three answers with ONE Bash call, substituting the picked values:
+
+    python3 "{SELF}" --set level=<Q1> mode=<Q2> model=<Q3>
+
+Finally tell the user in one line what is now set. Nothing more."""
+
+
+def command(arg: str) -> str:
+    arg = arg.strip().lower()
+    if arg == "status":
+        cfg = config()
+        key = "set" if os.environ.get("ANTHROPIC_API_KEY") else "MISSING"
+        return (
+            "Report these settings to the user in one short block, nothing else:\n"
+            f"level={cfg['level']} mode={cfg['mode']} model={cfg['model']}\n"
+            f"style={cfg['style'] or '(none)'}\n"
+            f"ANTHROPIC_API_KEY={key}"
+            + ("\nWithout the key nothing is rewritten." if key == "MISSING" else "")
+        )
+    if arg in LEVEL_WORDS:
+        cfg = save(level="full" if arg == "on" else arg)
+        return (
+            f"Boost level is now '{cfg['level']}'. Tell the user that in one"
+            " line and stop. Do not call any other tool."
+        )
+    if arg:
+        return f"'{arg}' is not a level. Say so in one line, then:\n\n{PICKER}"
+    return PICKER
+
+
 def selftest() -> None:
+    global CONFIG                    # never write the real settings from a test
+    CONFIG = os.path.join(tempfile.gettempdir(), "boost-selftest.json")
     for p in ("", "ok", "/boost ultra", "what does this function do?",
               "danke, das passt so", "fix it"):
         assert skip(p), p
     for p in ("make the dashboard better", "clean up the parser and speed it up"):
         assert not skip(p), p
 
-    cfg = dict(DEFAULTS)
-    block = self_block(cfg)
-    assert "do not print it" in block and "Goal / Done" in block
-    assert "one line" in self_block({**cfg, "level": "lite"})
-    assert "biggest risk" in self_block({**cfg, "level": "ultra"})
-    assert "first lines of your answer" in self_block({**cfg, "show": True})
-    assert "one precise sentence" in self_block({**cfg, "mode": "rewrite"})
-    assert "in german" in self_block({**cfg, "style": "in german"})
-    assert "user's message wins" in api_block("Goal: x", cfg)
+    assert "AskUserQuestion" in command("")
+    assert "AskUserQuestion" in command("bogus") and "not a level" in command("bogus")
+    assert "level=" in command("status")
+    for w in LEVEL_WORDS:
+        assert "now" in command(w)
+    assert config()["level"] in tuple(LEVELS) + ("off",)
 
-    assert config()["level"] in LEVELS or config()["level"] == "off"
+    # The hook stays silent without a key, whatever the settings say.
+    saved, os.environ["ANTHROPIC_API_KEY"] = os.environ.pop("ANTHROPIC_API_KEY", None), ""
+    del os.environ["ANTHROPIC_API_KEY"]
+    assert rewrite("make the parser faster", config()) is None
+    if saved is not None:
+        os.environ["ANTHROPIC_API_KEY"] = saved
+    os.path.exists(CONFIG) and os.remove(CONFIG)
     print("selftest ok")
 
 
 def main() -> None:
     if "--selftest" in sys.argv:
         return selftest()
+    if "--cmd" in sys.argv:
+        i = sys.argv.index("--cmd")
+        return print(command(sys.argv[i + 1] if len(sys.argv) > i + 1 else ""))
+    if "--set" in sys.argv:
+        fields = dict(a.split("=", 1) for a in sys.argv[sys.argv.index("--set") + 1:]
+                      if "=" in a)
+        fields = {k: v for k, v in fields.items() if k in DEFAULTS}
+        return print(json.dumps(save(**fields)))
+
     prompt = json.load(sys.stdin).get("prompt", "")
     cfg = config()
-    if cfg["level"] == "off" or skip(prompt):
+    if cfg["level"] == "off" or skip(prompt) or os.environ.get("BOOST_CHILD"):
         return
-    if cfg["model"] != "self":
-        sharpened = rewrite(prompt, cfg)
-        if sharpened:
-            print(api_block(sharpened, cfg))
-            return                   # no key or API down: fall through to self
-    print(self_block(cfg))
+    sharper = rewrite(prompt, cfg)
+    if sharper:                      # nothing to say when there is no rewrite
+        print(f"<boosted-prompt>\n{sharper}\n</boosted-prompt>")
 
 
 if __name__ == "__main__":

@@ -4,20 +4,38 @@ Most bad agent output starts with a bad brief. You type *"clean up the parser"*,
 the model picks one of five readings, and you find out which one after it has
 rewritten a file you liked.
 
-`prompt-boost` sharpens the **request** before the model acts on it. That is all
-it does — it never touches how the answer is written. Your model's tone, format,
-length and working style stay exactly as they were.
+`prompt-boost` rewrites the prompt before the model sees it. That is the whole
+feature. A small model turns your request into a sharper version of the same
+request, and that text is all the hook emits — no instructions about tone,
+format, length or how to work. Your model answers exactly as it always would,
+just to a better question.
 
 ```
-> /boost
+> make the dashboard better
 
-  Strength   full · lite · ultra · off
-  Kind       brief · rewrite · context
-  Model      self · claude-haiku-4-5 · claude-sonnet-5
+  ↓ rewritten before Claude sees it
+
+  Improve the dashboard in ops/dashboard: tighten spacing and typography in the
+  existing views without changing their data sources or layout structure.
+  Assumption: "better" means visual polish, not new features.
 ```
 
-Pick with the arrow keys, or set it straight: `/boost ultra`, `/boost off`.
-The choice is saved and applies to every prompt from then on.
+## Requires an API key
+
+The rewrite is a real model call, so it needs `ANTHROPIC_API_KEY` in the
+environment. Put it in `~/.claude/settings.json`:
+
+```json
+{ "env": { "ANTHROPIC_API_KEY": "sk-ant-..." } }
+```
+
+Get one at [console.anthropic.com](https://console.anthropic.com/settings/keys).
+It is billed per token and separate from a Claude subscription; on
+`claude-haiku-4-5` a rewrite costs a fraction of a cent and adds about a second.
+
+**Without a key the hook prints nothing at all** and your prompt reaches the
+model exactly as you typed it. Nothing breaks, nothing is added — boost is
+simply inactive.
 
 ## Install
 
@@ -28,6 +46,16 @@ The choice is saved and applies to every prompt from then on.
 
 That gives you the `/boost` command and the hook that runs on every prompt.
 
+## Use
+
+```
+/boost            arrow-key picker for strength, kind and model
+/boost ultra      set the strength straight (off | lite | full | ultra)
+/boost status     show the current settings and whether the key is set
+```
+
+The choice is saved and applies to every prompt from then on.
+
 ## Settings
 
 Everything lives in `~/.claude/boost.json`, read fresh on every prompt:
@@ -35,54 +63,37 @@ Everything lives in `~/.claude/boost.json`, read fresh on every prompt:
 ```json
 {
   "level": "full",
-  "mode": "brief",
+  "mode": "rewrite",
   "style": "",
-  "model": "self",
-  "show": false
+  "model": "claude-haiku-4-5"
 }
 ```
 
 | Key | Values | What it does |
 |---|---|---|
-| `level` | `off` `lite` `full` `ultra` | How hard to sharpen. `lite` is one line; `ultra` adds the biggest risk in the request. |
-| `mode` | `brief` `rewrite` `context` | What kind of sharpening — see below. |
-| `style` | free text | Appended to the instruction, e.g. `"prefer the smallest change that works"`. |
-| `model` | `self` or a model id | Who sharpens. `self` is the model already answering: no extra call, no added latency. |
-| `show` | `false` `true` | `true` prints the sharpened reading before the answer. Off by default. |
+| `level` | `off` `lite` `full` `ultra` | How far to push it. `lite` changes as little as possible; `full` marks filled gaps as assumptions; `ultra` adds the biggest risk in the request. |
+| `mode` | `rewrite` `brief` `context` | What the rewrite turns into — see below. |
+| `style` | free text | Extra steering for the rewriter, e.g. `"prefer the smallest change that works"`. |
+| `model` | an Anthropic model id | Who rewrites. `claude-haiku-4-5` is the cheap default. |
+| `timeout` | seconds (default 12) | Past this the prompt is left alone. |
 
-`/boost` covers `level`, `mode` and `model`; `style` and `show` are edited in the
-file.
+`/boost` covers `level`, `mode` and `model`; `style` and `timeout` are edited in
+the file.
 
-### The three modes
+### The three kinds
 
-| Mode | The request becomes |
+| Mode | Your request becomes |
 |---|---|
-| `brief` | `Goal:` / `Done:` / `Assume:` / `Not:` — verb, object, the check that proves it, the gap it filled, the scope fence |
-| `rewrite` | One precise sentence naming the target and the artifact |
-| `context` | What the request left implicit: the file or area it points at, and what would count as done |
-
-### Using a separate model
-
-With `model: "self"` nothing extra runs — the answering model just reads its own
-request more carefully, with the whole repo already in context. That is the
-default, and it costs nothing.
-
-Set `model` to an Anthropic model id (`claude-haiku-4-5` is the cheap one) and
-the prompt is rewritten through the API first. This needs `ANTHROPIC_API_KEY` in
-the environment — you can set it in `~/.claude/settings.json`:
-
-```json
-{ "env": { "ANTHROPIC_API_KEY": "sk-ant-..." } }
-```
-
-Without a key, or if the call fails or times out, the prompt is left exactly as
-you typed it and `self` takes over. A rewrite adds about a second per prompt.
+| `rewrite` | A precise request naming the target and the artifact that should exist afterwards |
+| `brief` | `Goal:` / `Done:` / `Assume:` / `Not:` — what to do, the check that proves it, the gap it filled, the scope fence |
+| `context` | The same request with the implicit parts spelled out |
 
 ## What it does not do
 
-It does not tell the model to be terse, to skip preamble, to print a brief, or
-to work in any particular way. Everything the hook emits is scoped to reading
-your request. If you want the brief visible, that is `"show": true` — opt-in.
+It never adds instructions for the answering model — not about being terse, not
+about skipping preamble, not about printing anything. The hook's entire output
+is your rewritten prompt inside a `<boosted-prompt>` tag. If the rewrite fails,
+times out, or has no key, the output is empty.
 
 ## The hook
 

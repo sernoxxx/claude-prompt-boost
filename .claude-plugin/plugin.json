@@ -1,7 +1,7 @@
 {
   "name": "prompt-boost",
-  "version": "2.0.0",
-  "description": "Sharpens your request before the model acts on it - never touches how the answer is written. One switch, arrow-key picker, settings in ~/.claude/boost.json.",
+  "version": "3.0.0",
+  "description": "Rewrites your prompt before the model sees it - and emits nothing else. Needs ANTHROPIC_API_KEY; without it the hook stays silent.",
   "author": {
     "name": "sernoxxx",
     "url": "https://github.com/sernoxxx"
