@@ -1,7 +1,7 @@
 {
   "name": "prompt-boost",
-  "version": "3.1.0",
-  "description": "Sharpens your request before the model acts on it, and shapes nothing else about the answer. No API key needed.",
+  "version": "4.0.0",
+  "description": "Rewrites your prompt before the model sees it, on your Claude subscription - no API key. Shapes nothing else about the answer.",
   "author": {
     "name": "sernoxxx",
     "url": "https://github.com/sernoxxx"

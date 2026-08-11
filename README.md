@@ -12,29 +12,35 @@ answers exactly as it always would, just to a better question.
 ```
 > make the dashboard better
 
-  ↓ read as
+  ↓ rewritten before Claude sees it
 
   Improve the dashboard in ops/dashboard: tighten spacing and typography in the
   existing views without changing their data sources or layout structure.
   Assumption: "better" means visual polish, not new features.
 ```
 
-## No API key needed
+## Runs on your subscription — no API key
 
-By default the model that is already answering restates your request first —
-no second call, no key, no added latency.
+The rewrite is a real model call, but it goes through the `claude` CLI you
+already have, on the login you already have. No key, no separate billing. It
+adds about 7 seconds to a prompt.
 
-If you would rather have a separate model rewrite the prompt before your model
-sees it, set `model` to an Anthropic model id and put a key in
-`~/.claude/settings.json`:
+The rewriter runs in a config dir of its own (`~/.claude/boost-child`), so your
+session hooks do not fire inside it — with them loaded a child session blocks on
+a permission prompt and takes 40 seconds instead of 7.
 
-```json
-{ "env": { "ANTHROPIC_API_KEY": "sk-ant-..." } }
-```
+Two other settings for `model`:
 
-That adds about a second per prompt and is billed per token, separately from a
-Claude subscription. Without a key — or if the call fails or times out — it
-falls back to the keyless path, so nothing breaks either way.
+- `"self"` — no separate call and no wait at all: the model that is already
+  answering restates the request itself.
+- an Anthropic model id like `"claude-haiku-4-5"` — goes through the API
+  instead, if you have `ANTHROPIC_API_KEY` set. Faster, billed per token.
+
+If the rewrite fails or times out, `self` takes over. Nothing breaks either way.
+
+**Sonnet is the default rewriter, not Haiku.** Haiku is faster but keeps
+answering the request or asking clarifying questions instead of rewriting it —
+"rewrite this without answering it" turns out to need the bigger model.
 
 ## Install
 
@@ -64,7 +70,7 @@ Everything lives in `~/.claude/boost.json`, read fresh on every prompt:
   "level": "full",
   "mode": "rewrite",
   "style": "",
-  "model": "self"
+  "model": "sonnet"
 }
 ```
 
@@ -73,8 +79,8 @@ Everything lives in `~/.claude/boost.json`, read fresh on every prompt:
 | `level` | `off` `lite` `full` `ultra` | How far to push it. `lite` changes as little as possible; `full` marks filled gaps as assumptions; `ultra` adds the biggest risk in the request. |
 | `mode` | `rewrite` `brief` `context` | What the rewrite turns into — see below. |
 | `style` | free text | Extra steering for the rewriter, e.g. `"prefer the smallest change that works"`. |
-| `model` | `self` or an Anthropic model id | Who sharpens. `self` is the model already answering: no key, no extra call. |
-| `timeout` | seconds (default 12) | Past this the prompt is left alone. |
+| `model` | `sonnet` `haiku` `opus` `self`, or an API model id | Who rewrites. CLI aliases run on your subscription; `self` skips the call entirely. |
+| `timeout` | seconds (default 25) | Past this, `self` takes over. Keep the hook timeout in `settings.json` above it. |
 
 `/boost` covers `level`, `mode` and `model`; `style` and `timeout` are edited in
 the file.

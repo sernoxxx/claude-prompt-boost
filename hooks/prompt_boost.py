@@ -24,18 +24,21 @@ Self-check: python3 prompt_boost.py --selftest
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import urllib.request
 
 CONFIG = os.path.expanduser("~/.claude/boost.json")
+CREDS = os.path.expanduser("~/.claude/.credentials.json")
+CHILD = os.path.expanduser("~/.claude/boost-child")
 SELF = os.path.abspath(__file__)
 DEFAULTS = {
     "level": "full",
     "mode": "rewrite",
     "style": "",
-    "model": "self",
-    "timeout": 12,
+    "model": "sonnet",
+    "timeout": 25,
     "max_tokens": 600,
 }
 
@@ -72,8 +75,10 @@ RULES = (
     " do not solve it, and do not add instructions about how the answer should"
     " be written, formatted or toned - you are improving the question, not"
     " shaping the reply.\n"
-    "If a detail is missing, fill it with the most likely reading and mark it"
-    " as an assumption rather than asking."
+    "Keep the rewrite compact: under 100 words unless the original is longer.\n"
+    "Never ask a question and never address the user - you are not talking to"
+    " them, you are producing the text they will send. If a detail is missing,"
+    " fill it with the most likely reading and mark it as an assumption."
 )
 
 LEVEL_WORDS = ("off", "on", "lite", "full", "ultra")
@@ -131,14 +136,53 @@ def self_block(cfg: dict) -> str:
     )
 
 
+def child_env() -> dict:
+    """A config dir of its own for the rewriter: your login, none of your hooks.
+
+    Pointing CLAUDE_CONFIG_DIR at an empty dir keeps the session hooks from
+    firing in the child (they would block on a permission prompt and take 40s).
+    The credentials symlink is what keeps this on your subscription instead of
+    wanting an API key.
+    """
+    os.makedirs(CHILD, mode=0o700, exist_ok=True)
+    link = os.path.join(CHILD, ".credentials.json")
+    if not os.path.lexists(link):
+        os.symlink(CREDS, link)
+    settings = os.path.join(CHILD, "settings.json")
+    if not os.path.exists(settings):
+        with open(settings, "w") as f:
+            f.write("{}")
+    return {**os.environ, "CLAUDE_CONFIG_DIR": CHILD, "BOOST_CHILD": "1"}
+
+
+def cli_rewrite(prompt: str, cfg: dict):
+    """Rewrite through the Claude CLI - your subscription, no API key."""
+    try:
+        out = subprocess.run(
+            ["claude", "-p", "--model", cfg["model"],
+             "--system-prompt", system_prompt(cfg),
+             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'],
+            input=prompt,
+            capture_output=True, text=True, timeout=cfg["timeout"],
+            env=child_env(), cwd=CHILD,
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def system_prompt(cfg: dict) -> str:
+    return "\n".join(
+        [RULES, MODES[cfg["mode"]], LEVELS[cfg["level"]], cfg.get("style", "")]
+    ).strip()
+
+
 def rewrite(prompt: str, cfg: dict):
     """The rewritten prompt, or None on any failure - caller then stays silent."""
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         return None
-    system = "\n".join(
-        [RULES, MODES[cfg["mode"]], LEVELS[cfg["level"]], cfg.get("style", "")]
-    ).strip()
+    system = system_prompt(cfg)
     body = json.dumps({
         "model": cfg["model"],
         "max_tokens": cfg["max_tokens"],
@@ -184,9 +228,9 @@ Q2 header "Kind", question "Rewritten into what?"
    - "context" - the same request with the implicit parts spelled out
 
 Q3 header "Model", question "Who rewrites the prompt?"
-   - "self" - the model already answering, no API key, no added latency (Recommended)
-   - "claude-haiku-4-5" - a separate model rewrites it first (needs ANTHROPIC_API_KEY)
-   - "claude-sonnet-5" - same, stronger and pricier
+   - "sonnet" - Sonnet rewrites it first, on your subscription, ~8s (Recommended)
+   - "self" - no separate call and no wait: the answering model restates it itself
+   - "haiku" - faster, but often answers or asks instead of rewriting
 
 Then save all three answers with ONE Bash call, substituting the picked values:
 
@@ -269,10 +313,10 @@ def main() -> None:
     if cfg["level"] == "off" or skip(prompt) or os.environ.get("BOOST_CHILD"):
         return
     if cfg["model"] != "self":
-        sharper = rewrite(prompt, cfg)
+        sharper = (rewrite if os.environ.get("ANTHROPIC_API_KEY") else cli_rewrite)(prompt, cfg)
         if sharper:
             return print(f"<boosted-prompt>\n{sharper}\n</boosted-prompt>")
-    print(self_block(cfg))           # no key, failed call, or "self": stay keyless
+    print(self_block(cfg))           # rewriter unavailable: the model does it itself
 
 
 if __name__ == "__main__":
