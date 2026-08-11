@@ -57,6 +57,7 @@ That gives you the `/boost` command and the hook that runs on every prompt.
 /boost            arrow-key picker for strength, kind and model
 /boost ultra      set the strength straight (off | lite | full | ultra)
 /boost status     show the current settings and whether the key is set
+/boost-mini       grammar-only: fixes wording, adds nothing
 ```
 
 The choice is saved and applies to every prompt from then on.
@@ -77,7 +78,7 @@ Everything lives in `~/.claude/boost.json`, read fresh on every prompt:
 | Key | Values | What it does |
 |---|---|---|
 | `level` | `off` `lite` `full` `ultra` | How far to push it. `lite` changes as little as possible; `full` marks filled gaps as assumptions; `ultra` adds the biggest risk in the request. |
-| `mode` | `rewrite` `brief` `context` | What the rewrite turns into — see below. |
+| `mode` | `rewrite` `brief` `context` `mini` | What the rewrite turns into — see below. |
 | `style` | free text | Extra steering for the rewriter, e.g. `"prefer the smallest change that works"`. |
 | `model` | `sonnet` `haiku` `opus` `self`, or an API model id | Who rewrites. CLI aliases run on your subscription; `self` skips the call entirely. |
 | `timeout` | seconds (default 25) | Past this, `self` takes over. Keep the hook timeout in `settings.json` above it. |
@@ -85,13 +86,14 @@ Everything lives in `~/.claude/boost.json`, read fresh on every prompt:
 `/boost` covers `level`, `mode` and `model`; `style` and `timeout` are edited in
 the file.
 
-### The three kinds
+### The four kinds
 
 | Mode | Your request becomes |
 |---|---|
 | `rewrite` | A precise request naming the target and the artifact that should exist afterwards |
 | `brief` | `Goal:` / `Done:` / `Assume:` / `Not:` — what to do, the check that proves it, the gap it filled, the scope fence |
 | `context` | The same request with the implicit parts spelled out |
+| `mini` | The same request, only with grammar and sentence structure cleaned up — nothing added, no gaps filled (`level` is ignored) |
 
 ## What it does not do
 

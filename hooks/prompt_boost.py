@@ -10,7 +10,7 @@ Settings live in ~/.claude/boost.json and are read fresh on every prompt:
     {"level": "full", "mode": "rewrite", "style": "", "model": "self"}
 
     level  off | lite | full | ultra    how far to push it
-    mode   rewrite | brief | context    what the request turns into
+    mode   rewrite | brief | context | mini   what the request turns into
     style  free text                    extra steering
     model  self | an Anthropic model id who does the sharpening
 
@@ -57,6 +57,9 @@ MODES = {
     " scope left out. Drop any line you have nothing to put in.",
     "context": "Rewrite it with what it leaves implicit spelled out: which"
     " file or area it points at, and what would count as done.",
+    "mini": "Rewrite it only for grammar and sentence structure: fix mistakes,"
+    " straighten word order, split run-on sentences, drop filler. Keep every"
+    " word that carries meaning, add nothing, fill no gaps.",
 }
 
 LEVELS = {
@@ -128,10 +131,11 @@ def self_block(cfg: dict) -> str:
     length or process - that is what made v1 change how answers were written.
     """
     style = f" {cfg['style'].strip()}" if cfg.get("style") else ""
+    level = "" if cfg["mode"] == "mini" else f" {LEVELS[cfg['level']]}"
     return (
         f"<boost>\nBefore acting, restate the request above to yourself"
         f" {MODES[cfg['mode']].replace('Rewrite it ', '')}"
-        f" {LEVELS[cfg['level']]}{style}\n"
+        f"{level}{style}\n"
         "That restatement is only your reading of the request.\n</boost>"
     )
 
@@ -172,8 +176,9 @@ def cli_rewrite(prompt: str, cfg: dict):
 
 
 def system_prompt(cfg: dict) -> str:
+    level = "" if cfg["mode"] == "mini" else LEVELS[cfg["level"]]
     return "\n".join(
-        [RULES, MODES[cfg["mode"]], LEVELS[cfg["level"]], cfg.get("style", "")]
+        [RULES, MODES[cfg["mode"]], level, cfg.get("style", "")]
     ).strip()
 
 
@@ -226,6 +231,7 @@ Q2 header "Kind", question "Rewritten into what?"
    - "rewrite" - a precise request naming target and artifact (Recommended)
    - "brief" - Goal / Done / Assume / Not
    - "context" - the same request with the implicit parts spelled out
+   - "mini" - grammar and sentence structure only, nothing added
 
 Q3 header "Model", question "Who rewrites the prompt?"
    - "sonnet" - Sonnet rewrites it first, on your subscription, ~8s (Recommended)
@@ -250,6 +256,13 @@ def command(arg: str) -> str:
             f"style={cfg['style'] or '(none)'}\n"
             f"ANTHROPIC_API_KEY={key}"
             + ("\nWithout the key nothing is rewritten." if key == "MISSING" else "")
+        )
+    if arg == "mini":
+        save(level="lite", mode="mini")
+        return (
+            "Boost is now grammar-only: prompts get their grammar and sentence"
+            " structure cleaned up, nothing else. Tell the user that in one"
+            " line and stop. Do not call any other tool."
         )
     if arg in LEVEL_WORDS:
         cfg = save(level="full" if arg == "on" else arg)
@@ -285,6 +298,11 @@ def selftest() -> None:
     assert "restate the request" in block.lower()
     assert "one sentence" in self_block({**cfg, "level": "lite"}).lower()
     assert "goal / done" in self_block({**cfg, "mode": "brief"}).lower()
+
+    mini = {**cfg, "mode": "mini", "level": "ultra"}
+    assert "grammar" in self_block(mini).lower()
+    assert "risk" not in system_prompt(mini).lower()      # level stays out of mini
+    assert "grammar-only" in command("mini")
 
     # The API path stays silent without a key; main() then falls back to self.
     saved, os.environ["ANTHROPIC_API_KEY"] = os.environ.pop("ANTHROPIC_API_KEY", None), ""
