@@ -1,5 +1,5 @@
 {
-  "description": "Sharpens the user's request before the model acts on it, using the settings in ~/.claude/boost.json. Never changes how the answer is written.",
+  "description": "Rewrites your prompt before you send it, using the settings in ~/.claude/boost.json, and hands the rewrite back to your input box in a cleared session. Never changes how the answer is written.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt_boost.py\"",
-            "timeout": 15
+            "timeout": 30
           }
         ]
       }

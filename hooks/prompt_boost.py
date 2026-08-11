@@ -5,19 +5,17 @@ The hook only ever shapes how the request is read. It says nothing about tone,
 format, length, verbosity or how to work - answers come out exactly as they
 would have without it.
 
-Settings live in ~/.claude/boost.json and are read fresh on every prompt:
+What happens when you hit enter:
 
-    {"level": "full", "mode": "rewrite", "style": "", "model": "self"}
+    your prompt  ->  rewritten by a second model  ->  the original is blocked,
+    the session is cleared, and the rewrite lands in your input box
 
-    level  off | lite | full | ultra    how far to push it
-    mode   rewrite | brief | context | mini   what the request turns into
-    style  free text                    extra steering
-    model  self | an Anthropic model id who does the sharpening
+Nothing is sent until you press enter yourself, so you always see and can edit
+the request the model will actually get. It starts from a cleared session, so
+the boosting never ends up in the context.
 
-With model "self" (the default) the answering model restates the request
-itself: no API key, no second call, no added latency. Set a model id instead
-and the prompt is rewritten through the Anthropic API first, which needs
-ANTHROPIC_API_KEY - without it, or on any failure, "self" takes over.
+Settings live in ~/.claude/boost.json and are only ever changed by the `/boost`
+picker - one way to set this up, not three.
 
 Self-check: python3 prompt_boost.py --selftest
 """
@@ -33,6 +31,7 @@ CONFIG = os.path.expanduser("~/.claude/boost.json")
 CREDS = os.path.expanduser("~/.claude/.credentials.json")
 CHILD = os.path.expanduser("~/.claude/boost-child")
 SELF = os.path.abspath(__file__)
+POWERSHELL = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 DEFAULTS = {
     "level": "full",
     "mode": "rewrite",
@@ -41,6 +40,11 @@ DEFAULTS = {
     "timeout": 25,
     "max_tokens": 600,
 }
+
+# Handing text to a live TUI is a timing game: too early and it lands in the old
+# session, too late and you sit in front of an empty box. Tune here.
+CLEAR_DELAY_MS = 900      # let the blocked prompt settle, then clear
+TYPE_DELAY_MS = 2500      # let the fresh session come up, then hand over the text
 
 # Acknowledgements, corrections and other non-briefs: nothing to rewrite.
 CHATTER = re.compile(
@@ -84,8 +88,6 @@ RULES = (
     " fill it with the most likely reading and mark it as an assumption."
 )
 
-LEVEL_WORDS = ("off", "on", "lite", "full", "ultra")
-
 
 def skip(prompt: str) -> bool:
     """True when the prompt is not a work request worth rewriting."""
@@ -113,6 +115,8 @@ def config() -> dict:
         cfg["mode"] = DEFAULTS["mode"]
     if cfg["level"] not in LEVELS and cfg["level"] != "off":
         cfg["level"] = DEFAULTS["level"]
+    if cfg["model"] == "self":       # dropped: leaves nothing to hand back
+        cfg["model"] = DEFAULTS["model"]
     return cfg
 
 
@@ -122,22 +126,6 @@ def save(**fields) -> dict:
     with open(CONFIG, "w") as f:
         json.dump(cfg, f, indent=2)
     return cfg
-
-
-def self_block(cfg: dict) -> str:
-    """The keyless path: the answering model restates the request itself.
-
-    Two sentences, both about reading the request. Nothing about tone, format,
-    length or process - that is what made v1 change how answers were written.
-    """
-    style = f" {cfg['style'].strip()}" if cfg.get("style") else ""
-    level = "" if cfg["mode"] == "mini" else f" {LEVELS[cfg['level']]}"
-    return (
-        f"<boost>\nBefore acting, restate the request above to yourself"
-        f" {MODES[cfg['mode']].replace('Rewrite it ', '')}"
-        f"{level}{style}\n"
-        "That restatement is only your reading of the request.\n</boost>"
-    )
 
 
 def child_env() -> dict:
@@ -212,14 +200,57 @@ def rewrite(prompt: str, cfg: dict):
         return None
 
 
+# --- getting the rewrite into your input box -----------------------------
+
+def keys_escape(text: str) -> str:
+    """SendKeys reads +^%~(){}[] as commands; braces around them mean literal."""
+    return "".join("{%s}" % c if c in "+^%~(){}[]" else c for c in text)
+
+
+def hand_to_input_box(text: str) -> bool:
+    """Clear the session, then put the rewrite in the input box, unsent.
+
+    No hook output can fill that box, so this goes the way you would: the same
+    key events, sent to the foreground window - the terminal you just hit enter
+    in. Windows only (WSL counts); False anywhere else, and the caller then
+    falls back to the old inline behaviour.
+
+    Line breaks are flattened to spaces on purpose: a line break here is an
+    enter, and that would send the prompt instead of leaving it to you.
+    """
+    if not os.path.exists(POWERSHELL):
+        return False
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
+                                         encoding="utf-8") as f:
+            f.write(keys_escape(" ".join(text.split())))
+        win = subprocess.run(["wslpath", "-w", f.name],
+                             capture_output=True, text=True).stdout.strip()
+        subprocess.Popen(
+            [POWERSHELL, "-NoProfile", "-Command",
+             f"Start-Sleep -Milliseconds {CLEAR_DELAY_MS};"
+             "$w = New-Object -ComObject wscript.shell;"
+             "$w.SendKeys('/clear{ENTER}');"
+             f"Start-Sleep -Milliseconds {TYPE_DELAY_MS};"
+             f"$w.SendKeys([IO.File]::ReadAllText('{win}'));"
+             f"Remove-Item -LiteralPath '{win}'"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return True
+    except Exception:
+        return False
+
+
 # --- /boost command ------------------------------------------------------
 
 PICKER = f"""BOOST SETTINGS PICKER
 
 Call the `AskUserQuestion` tool RIGHT NOW, as the very first thing you do, with
 exactly the three questions below. Write no text before the tool call. The user
-typed a bare `/boost`, which is a request for this picker - asking is correct
-even when the answer looks predictable.
+typed `/boost`, which is a request for this picker - asking is correct even when
+the answer looks predictable. Anything typed after `/boost` is not a setting:
+this picker is the only way in.
 
 Q1 header "Strength", question "How far should your prompts be rewritten?"
    - "full" - fill gaps and mark them as assumptions (Recommended)
@@ -234,8 +265,7 @@ Q2 header "Kind", question "Rewritten into what?"
    - "mini" - grammar and sentence structure only, nothing added
 
 Q3 header "Model", question "Who rewrites the prompt?"
-   - "sonnet" - Sonnet rewrites it first, on your subscription, ~8s (Recommended)
-   - "self" - no separate call and no wait: the answering model restates it itself
+   - "sonnet" - rewrites on your subscription, ~8s (Recommended)
    - "haiku" - faster, but often answers or asks instead of rewriting
 
 Then save all three answers with ONE Bash call, substituting the picked values:
@@ -243,36 +273,6 @@ Then save all three answers with ONE Bash call, substituting the picked values:
     python3 "{SELF}" --set level=<Q1> mode=<Q2> model=<Q3>
 
 Finally tell the user in one line what is now set. Nothing more."""
-
-
-def command(arg: str) -> str:
-    arg = arg.strip().lower()
-    if arg == "status":
-        cfg = config()
-        key = "set" if os.environ.get("ANTHROPIC_API_KEY") else "MISSING"
-        return (
-            "Report these settings to the user in one short block, nothing else:\n"
-            f"level={cfg['level']} mode={cfg['mode']} model={cfg['model']}\n"
-            f"style={cfg['style'] or '(none)'}\n"
-            f"ANTHROPIC_API_KEY={key}"
-            + ("\nWithout the key nothing is rewritten." if key == "MISSING" else "")
-        )
-    if arg == "mini":
-        save(level="lite", mode="mini")
-        return (
-            "Boost is now grammar-only: prompts get their grammar and sentence"
-            " structure cleaned up, nothing else. Tell the user that in one"
-            " line and stop. Do not call any other tool."
-        )
-    if arg in LEVEL_WORDS:
-        cfg = save(level="full" if arg == "on" else arg)
-        return (
-            f"Boost level is now '{cfg['level']}'. Tell the user that in one"
-            " line and stop. Do not call any other tool."
-        )
-    if arg:
-        return f"'{arg}' is not a level. Say so in one line, then:\n\n{PICKER}"
-    return PICKER
 
 
 def selftest() -> None:
@@ -284,29 +284,20 @@ def selftest() -> None:
     for p in ("make the dashboard better", "clean up the parser and speed it up"):
         assert not skip(p), p
 
-    assert "AskUserQuestion" in command("")
-    assert "AskUserQuestion" in command("bogus") and "not a level" in command("bogus")
-    assert "level=" in command("status")
-    for w in LEVEL_WORDS:
-        assert "now" in command(w)
+    assert "AskUserQuestion" in PICKER
+    assert "self" not in PICKER.split('Q3')[1]     # one rewriter question, no self
     assert config()["level"] in tuple(LEVELS) + ("off",)
+    assert config()["model"] != "self"
 
-    cfg = config()
-    block = self_block(cfg)
-    for banned in ("tone", "format", "length", "concise", "preamble", "prose"):
-        assert banned not in block.lower(), banned
-    assert "restate the request" in block.lower()
-    assert "one sentence" in self_block({**cfg, "level": "lite"}).lower()
-    assert "goal / done" in self_block({**cfg, "mode": "brief"}).lower()
+    assert keys_escape("a+b{c}") == "a{+}b{{}c{}}"
+    assert keys_escape("plain text") == "plain text"
 
-    mini = {**cfg, "mode": "mini", "level": "ultra"}
-    assert "grammar" in self_block(mini).lower()
+    mini = {**config(), "mode": "mini", "level": "ultra"}
+    assert "grammar" in system_prompt(mini).lower()
     assert "risk" not in system_prompt(mini).lower()      # level stays out of mini
-    assert "grammar-only" in command("mini")
 
-    # The API path stays silent without a key; main() then falls back to self.
-    saved, os.environ["ANTHROPIC_API_KEY"] = os.environ.pop("ANTHROPIC_API_KEY", None), ""
-    del os.environ["ANTHROPIC_API_KEY"]
+    # The API path stays silent without a key; main() then falls back to the CLI.
+    saved = os.environ.pop("ANTHROPIC_API_KEY", None)
     assert rewrite("make the parser faster", config()) is None
     if saved is not None:
         os.environ["ANTHROPIC_API_KEY"] = saved
@@ -317,9 +308,8 @@ def selftest() -> None:
 def main() -> None:
     if "--selftest" in sys.argv:
         return selftest()
-    if "--cmd" in sys.argv:
-        i = sys.argv.index("--cmd")
-        return print(command(sys.argv[i + 1] if len(sys.argv) > i + 1 else ""))
+    if "--cmd" in sys.argv:          # /boost, whatever was typed after it
+        return print(PICKER)
     if "--set" in sys.argv:
         fields = dict(a.split("=", 1) for a in sys.argv[sys.argv.index("--set") + 1:]
                       if "=" in a)
@@ -330,11 +320,16 @@ def main() -> None:
     cfg = config()
     if cfg["level"] == "off" or skip(prompt) or os.environ.get("BOOST_CHILD"):
         return
-    if cfg["model"] != "self":
-        sharper = (rewrite if os.environ.get("ANTHROPIC_API_KEY") else cli_rewrite)(prompt, cfg)
-        if sharper:
-            return print(f"<boosted-prompt>\n{sharper}\n</boosted-prompt>")
-    print(self_block(cfg))           # rewriter unavailable: the model does it itself
+    sharper = (rewrite if os.environ.get("ANTHROPIC_API_KEY") else cli_rewrite)(prompt, cfg)
+    if not sharper:                  # rewriter down: let the original through
+        return
+    if not hand_to_input_box(sharper):
+        return print(f"<boosted-prompt>\n{sharper}\n</boosted-prompt>")
+    print(json.dumps({
+        "decision": "block",
+        "reason": "Boosted. Fresh session, and the rewrite is waiting in your"
+                  " input box - press enter to send it:\n\n" + sharper,
+    }))
 
 
 if __name__ == "__main__":

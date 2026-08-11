@@ -1,10 +1,9 @@
 ---
-description: Set how your prompt gets rewritten before Claude sees it
-argument-hint: [off|lite|full|ultra|status]
+description: Pick how your prompt gets rewritten before you send it
 allowed-tools: Bash(python3:*)
 ---
 
-!`python3 ~/.claude/hooks/prompt_boost.py --cmd "$ARGUMENTS"`
+!`python3 ~/.claude/hooks/prompt_boost.py --cmd`
 
 Do exactly what the block above says, starting with its first instruction, and
 nothing beyond it.
