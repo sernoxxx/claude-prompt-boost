@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: rewrites the user's prompt. Nothing else.
+"""UserPromptSubmit hook: sharpens the user's request. Nothing else.
 
-A model rewrites the request into a sharper version of itself, and that
-rewritten text is all the hook emits. It never tells the answering model how
-to work, what to print, or how to write - there is no instruction in the
-output at all, only the improved prompt.
+The hook only ever shapes how the request is read. It says nothing about tone,
+format, length, verbosity or how to work - answers come out exactly as they
+would have without it.
 
 Settings live in ~/.claude/boost.json and are read fresh on every prompt:
 
-    {"level": "full", "mode": "rewrite", "style": "", "model": "claude-haiku-4-5"}
+    {"level": "full", "mode": "rewrite", "style": "", "model": "self"}
 
-    level  off | lite | full | ultra    how far to push the rewrite
-    mode   rewrite | brief | context    what the rewrite turns into
-    style  free text                    extra steering for the rewriter
-    model  an Anthropic model id        who rewrites
+    level  off | lite | full | ultra    how far to push it
+    mode   rewrite | brief | context    what the request turns into
+    style  free text                    extra steering
+    model  self | an Anthropic model id who does the sharpening
 
-Needs ANTHROPIC_API_KEY in the environment. Without it - or if the call fails,
-times out, or returns nothing - the hook prints nothing and your prompt reaches
-the model exactly as you typed it.
+With model "self" (the default) the answering model restates the request
+itself: no API key, no second call, no added latency. Set a model id instead
+and the prompt is rewritten through the Anthropic API first, which needs
+ANTHROPIC_API_KEY - without it, or on any failure, "self" takes over.
 
 Self-check: python3 prompt_boost.py --selftest
 """
@@ -34,7 +34,7 @@ DEFAULTS = {
     "level": "full",
     "mode": "rewrite",
     "style": "",
-    "model": "claude-haiku-4-5",
+    "model": "self",
     "timeout": 12,
     "max_tokens": 600,
 }
@@ -103,8 +103,6 @@ def config() -> dict:
         pass
     if cfg["mode"] not in MODES:
         cfg["mode"] = DEFAULTS["mode"]
-    if cfg["model"] == "self":       # v2 setting; there is no self-rewrite now
-        cfg["model"] = DEFAULTS["model"]
     if cfg["level"] not in LEVELS and cfg["level"] != "off":
         cfg["level"] = DEFAULTS["level"]
     return cfg
@@ -116,6 +114,21 @@ def save(**fields) -> dict:
     with open(CONFIG, "w") as f:
         json.dump(cfg, f, indent=2)
     return cfg
+
+
+def self_block(cfg: dict) -> str:
+    """The keyless path: the answering model restates the request itself.
+
+    Two sentences, both about reading the request. Nothing about tone, format,
+    length or process - that is what made v1 change how answers were written.
+    """
+    style = f" {cfg['style'].strip()}" if cfg.get("style") else ""
+    return (
+        f"<boost>\nBefore acting, restate the request above to yourself"
+        f" {MODES[cfg['mode']].replace('Rewrite it ', '')}"
+        f" {LEVELS[cfg['level']]}{style}\n"
+        "That restatement is only your reading of the request.\n</boost>"
+    )
 
 
 def rewrite(prompt: str, cfg: dict):
@@ -170,10 +183,10 @@ Q2 header "Kind", question "Rewritten into what?"
    - "brief" - Goal / Done / Assume / Not
    - "context" - the same request with the implicit parts spelled out
 
-Q3 header "Model", question "Which model rewrites the prompt?"
-   - "claude-haiku-4-5" - fastest and cheapest (Recommended)
-   - "claude-sonnet-5" - stronger, slower, pricier
-   - "claude-opus-5" - strongest, slowest, priciest
+Q3 header "Model", question "Who rewrites the prompt?"
+   - "self" - the model already answering, no API key, no added latency (Recommended)
+   - "claude-haiku-4-5" - a separate model rewrites it first (needs ANTHROPIC_API_KEY)
+   - "claude-sonnet-5" - same, stronger and pricier
 
 Then save all three answers with ONE Bash call, substituting the picked values:
 
@@ -221,7 +234,15 @@ def selftest() -> None:
         assert "now" in command(w)
     assert config()["level"] in tuple(LEVELS) + ("off",)
 
-    # The hook stays silent without a key, whatever the settings say.
+    cfg = config()
+    block = self_block(cfg)
+    for banned in ("tone", "format", "length", "concise", "preamble", "prose"):
+        assert banned not in block.lower(), banned
+    assert "restate the request" in block.lower()
+    assert "one sentence" in self_block({**cfg, "level": "lite"}).lower()
+    assert "goal / done" in self_block({**cfg, "mode": "brief"}).lower()
+
+    # The API path stays silent without a key; main() then falls back to self.
     saved, os.environ["ANTHROPIC_API_KEY"] = os.environ.pop("ANTHROPIC_API_KEY", None), ""
     del os.environ["ANTHROPIC_API_KEY"]
     assert rewrite("make the parser faster", config()) is None
@@ -247,9 +268,11 @@ def main() -> None:
     cfg = config()
     if cfg["level"] == "off" or skip(prompt) or os.environ.get("BOOST_CHILD"):
         return
-    sharper = rewrite(prompt, cfg)
-    if sharper:                      # nothing to say when there is no rewrite
-        print(f"<boosted-prompt>\n{sharper}\n</boosted-prompt>")
+    if cfg["model"] != "self":
+        sharper = rewrite(prompt, cfg)
+        if sharper:
+            return print(f"<boosted-prompt>\n{sharper}\n</boosted-prompt>")
+    print(self_block(cfg))           # no key, failed call, or "self": stay keyless
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
   "name": "prompt-boost",
-  "version": "3.0.0",
-  "description": "Rewrites your prompt before the model sees it - and emits nothing else. Needs ANTHROPIC_API_KEY; without it the hook stays silent.",
+  "version": "3.1.0",
+  "description": "Sharpens your request before the model acts on it, and shapes nothing else about the answer. No API key needed.",
   "author": {
     "name": "sernoxxx",
     "url": "https://github.com/sernoxxx"
