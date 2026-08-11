@@ -1,12 +1,13 @@
 {
-  "description": "Appends a short refinement instruction to vague prompts, so the model states a checkable brief before it starts working.",
+  "description": "Sharpens the user's request before the model acts on it, using the settings in ~/.claude/boost.json. Never changes how the answer is written.",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt_boost.py\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt_boost.py\"",
+            "timeout": 15
           }
         ]
       }

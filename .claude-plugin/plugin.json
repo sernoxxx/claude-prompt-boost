@@ -1,12 +1,20 @@
 {
   "name": "prompt-boost",
-  "version": "1.0.0",
-  "description": "Turns a vague request into a checkable brief before any work starts. One slash command, one optional hook, no extra model call.",
-  "author": { "name": "sernoxxx", "url": "https://github.com/sernoxxx" },
+  "version": "2.0.0",
+  "description": "Sharpens your request before the model acts on it - never touches how the answer is written. One switch, arrow-key picker, settings in ~/.claude/boost.json.",
+  "author": {
+    "name": "sernoxxx",
+    "url": "https://github.com/sernoxxx"
+  },
   "homepage": "https://github.com/sernoxxx/prompt-boost",
   "repository": "https://github.com/sernoxxx/prompt-boost",
   "license": "MIT",
-  "keywords": ["prompt", "productivity", "workflow", "scope"],
+  "keywords": [
+    "prompt",
+    "productivity",
+    "workflow",
+    "scope"
+  ],
   "commands": "./commands/",
   "hooks": "./hooks/hooks.json"
 }

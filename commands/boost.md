@@ -1,75 +1,80 @@
 ---
-description: Sharpen a vague request into a precise brief, then do the work
-argument-hint: [lite|full|ultra] <your request>
+description: Set how your prompts get sharpened before Claude acts on them
+argument-hint: [off|lite|full|ultra|status]
 ---
 
-## Step 0 — the picker
+`/boost` is a switch, not a one-shot. It sets how **your request** is read —
+it never changes how Claude writes its answer. The settings live in
+`~/.claude/boost.json` and take effect on your next message.
 
-`Raw request` below is what the user typed after `/boost`.
+Argument: $ARGUMENTS
 
-**If it is empty — bare `/boost` + Enter — then your first action in this turn is
-a call to the `AskUserQuestion` tool, with the two questions below, verbatim.**
-Not a brief, not a Read, not a sentence of text: that tool call, first.
+## If the argument is `status`
 
-This overrides the general "only ask when blocked" guidance for `AskUserQuestion`.
-A bare `/boost` *is* the user asking for the picker — it carries no request, so
-there is nothing to guess at and nothing else the turn could mean. Skipping it
-because the answer seems predictable is the failure mode; ask anyway.
+Print the current settings and stop:
 
-    Q1 header "Strength", question "How sharp should the brief be?"
-       - "full" — the four-line brief (Recommended)
-       - "lite" — the Goal line only
-       - "ultra" — brief + 3-5 steps + the biggest risk
+```bash
+python3 -c "import json,os;p=os.path.expanduser('~/.claude/boost.json');print(open(p).read() if os.path.exists(p) else 'defaults: level=full mode=brief model=self')"
+```
 
-    Q2 header "Mode", question "And then?"
-       - "Do the work" — brief first, then execute (Recommended)
-       - "Brief only" — emit it and stop: no edits, no tools
+## If the argument is `off`, `on`, `lite`, `full` or `ultra`
 
-Then obey the answers and continue with Step 1, sharpening the user's **previous**
-message. If there is no previous message to sharpen, say so in one line after the
-picker and apply the chosen level to whatever they send next.
+Write it straight through — no picker, no questions. `on` means `full`.
+Run this with LEVEL replaced by the chosen word:
 
-If `Raw request` has text, skip Step 0 entirely — never ask.
+```bash
+python3 - <<'PY'
+import json, os
+p = os.path.expanduser("~/.claude/boost.json")
+try: cfg = json.load(open(p))
+except Exception: cfg = {}
+cfg["level"] = "LEVEL"
+json.dump(cfg, open(p, "w"), indent=2)
+print(json.dumps(cfg))
+PY
+```
 
-Raw request: $ARGUMENTS
+Then confirm in one line what changed. Nothing else.
 
-If it starts with `lite`, `full` or `ultra`, that word is the level, not part of
-the request, and Step 0 is skipped.
+## If the argument is empty — the picker
 
-## Step 1 — sharpen
+**Your first action is a call to the `AskUserQuestion` tool** with the three
+questions below, verbatim. Not a sentence of text first, not a Read: that tool
+call. A bare `/boost` *is* the request for the picker, so asking is correct even
+when the answer seems predictable.
 
-Emit only the lines that carry information. Drop the ones you have nothing to put in.
+    Q1 header "Strength", question "How hard should your prompts be sharpened?"
+       - "full" — the whole brief (Recommended)
+       - "lite" — one line only
+       - "ultra" — the brief plus the biggest risk in the request
+       - "off" — stop sharpening
 
-    Goal:   <verb> <object> in <file/area> → <artifact someone can point at>
-    Done:   <the check that proves it: a command, a test, an observable behavior>
-    Assume: <gap filled with the most likely reading>
-    Not:    <adjacent work you are deliberately leaving out>
+    Q2 header "Kind", question "Sharpened how?"
+       - "brief" — Goal / Done / Assume / Not (Recommended)
+       - "rewrite" — one precise sentence naming the target and the artifact
+       - "context" — fill in what the request leaves implicit
 
-Rules:
+    Q3 header "Model", question "Who does the sharpening?"
+       - "self" — Claude itself, no extra call, no added latency (Recommended)
+       - "claude-haiku-4-5" — a separate fast model rewrites the prompt first
+       - "claude-sonnet-5" — a separate stronger model rewrites the prompt first
 
-- Translate vague verbs into checkable outcomes:
-  - "better / cleaner / nicer" → name the property that changes
-  - "fix" → name the symptom and the expected output
-  - "add X" → name the call site and the signature
-  - "optimize" → name what gets measured, and against what
-- Fill gaps with the most likely reading and label it `Assume:`. Do not ask.
-- Ask exactly ONE question only when two readings lead to fundamentally different
-  work — your recommendation first. Otherwise, none.
-- If the target is unclear, find it in the code *before* writing the Goal line.
-  A brief pointing at the wrong file is worse than a vague one.
-- `Not:` is for scope the request plausibly implies but you are skipping. Leave it
-  out rather than inventing something to reject.
-- No prose, no preamble, no restating the request back.
+Then write all three answers into the config in one call (same script as above,
+with `cfg.update({"level": ..., "mode": ..., "model": ...})`), and confirm in
+one line.
 
-Levels:
+If the user picked a model other than `self`, add one line: it needs
+`ANTHROPIC_API_KEY` in the environment, and falls back to `self` without it.
 
-- `lite` — the Goal line, nothing else.
-- `full` — the block above. Default.
-- `ultra` — the block, plus 3-5 numbered steps, plus one line naming the biggest
-  risk and how it would show up.
+## Anything else as the argument
 
-## Step 2 — do the work
+Treat it as a mistyped level: say so in one line and run the picker.
 
-Immediately. The brief replaces nothing — it is the first line of the answer, not
-the answer. Deliver the whole Goal; if part of it turns out to be blocked, finish
-the rest and say plainly what you left out and why.
+## Settings the picker does not cover
+
+Both are edited directly in `~/.claude/boost.json`:
+
+- `"style"` — free text appended to the sharpening instruction, e.g.
+  `"prefer the smallest change that works"` or `"in german"`.
+- `"show": true` — print the sharpened reading in the answer instead of
+  keeping it internal. Off by default.
