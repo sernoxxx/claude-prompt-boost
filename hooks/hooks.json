@@ -1,0 +1,15 @@
+{
+  "description": "Appends a short refinement instruction to vague prompts, so the model states a checkable brief before it starts working.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt_boost.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
