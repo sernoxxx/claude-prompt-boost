@@ -3,16 +3,11 @@ description: Sharpen a vague request into a precise brief, then do the work
 argument-hint: [lite|full|ultra] <your request>
 ---
 
-Raw request: $ARGUMENTS
+## Step 0 — the picker
 
-If it is empty, use the user's last message in this conversation instead.
-If it starts with `lite`, `full` or `ultra`, that word is the level, not part of the request.
-
-## Step 0 — pick the settings
-
-Only when the raw request is empty (bare `/boost` + Enter): before anything else,
-call `AskUserQuestion` once with these two questions, then obey the answers.
-If the raw request has text, skip this step entirely — never ask.
+**If the raw request below is empty (bare `/boost` + Enter): your FIRST action is
+a call to the `AskUserQuestion` tool. Nothing before it — no brief, no other tool,
+no text.** Then obey the answers and continue with Step 1.
 
     Q1 header "Strength", question "How sharp should the brief be?"
        - "full — the four-line brief (Recommended)"
@@ -22,6 +17,15 @@ If the raw request has text, skip this step entirely — never ask.
     Q2 header "Mode", question "And then?"
        - "Brief + do the work (Recommended)"
        - "Brief only — emit it and stop, no edits, no tools"
+
+The request to sharpen is then the user's previous message in this conversation.
+
+If the raw request has text, skip Step 0 entirely — never ask.
+
+Raw request: $ARGUMENTS
+
+If it starts with `lite`, `full` or `ultra`, that word is the level, not part of
+the request, and Step 0 is skipped.
 
 ## Step 1 — sharpen
 
