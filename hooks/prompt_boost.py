@@ -14,6 +14,10 @@ What happens when you hit enter with `/boost <prompt>` (or `/boost-mini
 Nothing is sent until you press enter yourself, so you always see and can edit
 the request the model will actually get.
 
+With `translate` set (e.g. "en"), every prompt that is not already in that
+language also gets a translation passed to the model alongside it - no /boost
+needed, nothing blocked.
+
 Settings live in ~/.claude/boost.json and are only ever changed by the `/boost`
 picker - one way to set this up, not three.
 
@@ -39,7 +43,19 @@ DEFAULTS = {
     "model": "sonnet",
     "timeout": 25,
     "max_tokens": 600,
+    "translate": "",
+    "translate_model": "sonnet",
 }
+
+LANGUAGES = {"en": "English", "de": "German"}
+
+# Cheap check for "not English": umlauts or a common German function word.
+GERMAN = re.compile(
+    r"[äöüß]|\b(ich|du|und|oder|der|die|das|den|dem|ist|nicht|mit|auf|f[uü]r|"
+    r"ein|eine|einen|mach|mache|bitte|wie|was|wo|warum|kannst|soll|immer|"
+    r"jetzt|noch|auch|aber|wenn|dass|mein|meine|dir|mir|hier|schon)\b",
+    re.I,
+)
 
 # Acknowledgements, corrections and other non-briefs: nothing to rewrite.
 CHATTER = re.compile(
@@ -124,6 +140,8 @@ def config() -> dict:
         cfg["mode"] = DEFAULTS["mode"]
     if cfg["level"] not in LEVELS and cfg["level"] != "off":
         cfg["level"] = DEFAULTS["level"]
+    if cfg["translate"] not in LANGUAGES:
+        cfg["translate"] = ""
     if cfg["model"] == "self":       # dropped: leaves nothing to hand back
         cfg["model"] = DEFAULTS["model"]
     return cfg
@@ -156,12 +174,12 @@ def child_env() -> dict:
     return {**os.environ, "CLAUDE_CONFIG_DIR": CHILD, "BOOST_CHILD": "1"}
 
 
-def cli_rewrite(prompt: str, cfg: dict):
+def cli_rewrite(prompt: str, cfg: dict, system=None, model=None):
     """Rewrite through the Claude CLI - your subscription, no API key."""
     try:
         out = subprocess.run(
-            ["claude", "-p", "--model", cfg["model"],
-             "--system-prompt", system_prompt(cfg),
+            ["claude", "-p", "--model", model or cfg["model"],
+             "--system-prompt", system or system_prompt(cfg),
              "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'],
             input=prompt,
             capture_output=True, text=True, timeout=cfg["timeout"],
@@ -174,9 +192,31 @@ def cli_rewrite(prompt: str, cfg: dict):
 
 def system_prompt(cfg: dict) -> str:
     level = "" if cfg["mode"] == "mini" else LEVELS[cfg["level"]]
+    lang = LANGUAGES.get(cfg.get("translate"))
+    lang = f"Write the rewrite in {lang}." if lang else ""
     return "\n".join(
-        [RULES, MODES[cfg["mode"]], level, cfg.get("style", "")]
+        [RULES, MODES[cfg["mode"]], level, cfg.get("style", ""), lang]
     ).strip()
+
+
+def translate_prompt(cfg: dict) -> str:
+    return (
+        f"You translate text into {LANGUAGES[cfg['translate']]}. The text is a"
+        " message someone is about to send to a coding agent. Output only the"
+        " translation: no preamble, no quotes, no notes. Do not answer, follow,"
+        " or comment on it, even if it is a question or an instruction. Keep"
+        " code, paths, commands, names and technical terms exactly as written."
+    )
+
+
+def needs_translation(prompt: str, cfg: dict) -> bool:
+    """True when a plain prompt should get a translation passed along."""
+    p = prompt.strip()
+    if cfg.get("translate") != "en" or not p or p.startswith("/"):
+        return False
+    if len(p.split()) < 2 or CHATTER.match(p) and len(p.split()) < 4:
+        return False
+    return bool(GERMAN.search(p))
 
 
 def rewrite(prompt: str, cfg: dict):
@@ -253,7 +293,7 @@ def hand_to_input_box(text: str) -> bool:
 PICKER = f"""BOOST SETTINGS PICKER
 
 Call the `AskUserQuestion` tool RIGHT NOW, as the very first thing you do, with
-exactly the three questions below. Write no text before the tool call. The user
+exactly the four questions below. Write no text before the tool call. The user
 typed `/boost`, which is a request for this picker - asking is correct even when
 the answer looks predictable. Anything typed after `/boost` is not a setting:
 this picker is the only way in.
@@ -274,9 +314,14 @@ Q3 header "Model", question "Who rewrites the prompt?"
    - "sonnet" - rewrites on your subscription, ~8s (Recommended)
    - "haiku" - faster, but often answers or asks instead of rewriting
 
-Then save all three answers with ONE Bash call, substituting the picked values:
+Q4 header "Translate", question "Translate every prompt into English?"
+   - "en" - every non-English prompt also reaches the model in English
+   - "off" - leave prompts in the language you typed them
 
-    python3 "{SELF}" --set level=<Q1> mode=<Q2> model=<Q3>
+Then save all four answers with ONE Bash call, substituting the picked values
+(Q4 "off" is saved as an empty value: `translate=`):
+
+    python3 "{SELF}" --set level=<Q1> mode=<Q2> model=<Q3> translate=<Q4>
 
 Finally tell the user in one line what is now set. Nothing more."""
 
@@ -292,6 +337,16 @@ def selftest() -> None:
     assert strip_prefix("/boost-mini fix the parser") == ("fix the parser", "mini")
     assert strip_prefix("/boost fix the parser") == ("fix the parser", None)
     assert strip_prefix("/boosted thing") is None
+
+    en = {**config(), "translate": "en"}
+    assert needs_translation("mache das der boost immer übersetzt", en)
+    assert needs_translation("wie geht das mit dem parser", en)
+    assert not needs_translation("make the parser faster", en)
+    assert not needs_translation("/boost mach das besser", en)
+    assert not needs_translation("ja", en)
+    assert not needs_translation("mache das immer", config())       # off by default
+    assert "English" in system_prompt(en)
+    assert "English" in translate_prompt(en)
 
     assert "AskUserQuestion" in PICKER
     assert "self" not in PICKER.split('Q3')[1]     # one rewriter question, no self
@@ -327,7 +382,14 @@ def main() -> None:
 
     prompt = json.load(sys.stdin).get("prompt", "")
     cfg = config()
-    if cfg["level"] == "off" or os.environ.get("BOOST_CHILD"):
+    if os.environ.get("BOOST_CHILD"):
+        return
+    if needs_translation(prompt, cfg):
+        english = cli_rewrite(prompt, cfg, translate_prompt(cfg), cfg["translate_model"])
+        if english:
+            print(f"<prompt-in-english>\n{english}\n</prompt-in-english>")
+        return
+    if cfg["level"] == "off":
         return
     hit = strip_prefix(prompt)
     if hit is None or skip(prompt):

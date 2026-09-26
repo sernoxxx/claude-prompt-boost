@@ -54,7 +54,7 @@ That gives you the `/boost` and `/boost-mini` commands and the
 ## Use
 
 ```
-/boost                 the picker: strength, kind, rewriter
+/boost                 the picker: strength, kind, rewriter, translation
 /boost <prompt>        rewrite this prompt and drop it in your input box
 /boost-mini <prompt>   same, but grammar and sentence structure only
 ```
@@ -73,7 +73,8 @@ The picker writes `~/.claude/boost.json`, read fresh on every prompt:
   "level": "full",
   "mode": "rewrite",
   "style": "",
-  "model": "sonnet"
+  "model": "sonnet",
+  "translate": ""
 }
 ```
 
@@ -83,10 +84,20 @@ The picker writes `~/.claude/boost.json`, read fresh on every prompt:
 | `mode` | `rewrite` `brief` `context` `mini` | What the rewrite turns into — see below. |
 | `style` | free text | Extra steering for the rewriter, e.g. `"prefer the smallest change that works"`. |
 | `model` | `sonnet` `haiku` `opus`, or an API model id | Who rewrites. CLI aliases run on your subscription. |
+| `translate` | `""` `en` | With `en`, every prompt that is not already English also reaches the model in English — no `/boost` needed, nothing blocked. `/boost` rewrites come out in English too. |
+| `translate_model` | `sonnet` `haiku` … | Who translates. Sonnet takes about 2–3 s. |
 | `timeout` | seconds (default 25) | Past this, your original prompt goes through. Keep the hook timeout in `settings.json` above it. |
 
-`/boost` covers `level`, `mode` and `model`; `style` and `timeout` are edited in
-the file.
+`/boost` covers `level`, `mode`, `model` and `translate`; `style`, `timeout` and
+`translate_model` are edited in the file.
+
+### Translate every prompt
+
+Set `translate` to `en` and each plain prompt that looks German gets translated
+before the model sees it. A hook cannot replace what you typed, so the model
+gets your original plus the translation in a `<prompt-in-english>` block. Slash
+commands, one-word replies and prompts that are already English are left alone.
+If the translation fails, the prompt goes through untouched.
 
 ### The four kinds
 
@@ -107,7 +118,8 @@ model how to behave.
 ## The hook
 
 The plugin installs a `UserPromptSubmit` hook that only fires when you explicitly
-type `/boost <prompt>` or `/boost-mini <prompt>`. It skips everything else —
+type `/boost <prompt>` or `/boost-mini <prompt>` — or, with `translate` on, on every
+non-English prompt. Otherwise it skips everything else —
 slash commands, one-liners, questions, acknowledgements, and plain prompts.
 
 For `/boost <prompt>` it rewrites the text, keeps your current session intact,
