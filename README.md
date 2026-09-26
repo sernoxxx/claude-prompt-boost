@@ -74,6 +74,7 @@ The picker writes `~/.claude/boost.json`, read fresh on every prompt:
   "mode": "rewrite",
   "style": "",
   "model": "sonnet",
+  "auto": "off",
   "translate": ""
 }
 ```
@@ -84,11 +85,12 @@ The picker writes `~/.claude/boost.json`, read fresh on every prompt:
 | `mode` | `rewrite` `brief` `context` `mini` | What the rewrite turns into — see below. |
 | `style` | free text | Extra steering for the rewriter, e.g. `"prefer the smallest change that works"`. |
 | `model` | `sonnet` `haiku` `opus`, or an API model id | Who rewrites. CLI aliases run on your subscription. |
+| `auto` | `off` `on` | With `on`, every plain prompt is rewritten (same `level`, `mode`, `model`) and the rewrite is passed to the model next to your original, marked as the sharpened version. Adds about 4–5 s per prompt. Short replies, questions and slash commands are skipped. |
 | `translate` | `""` `en` | With `en`, every prompt that is not already English also reaches the model in English — no `/boost` needed, nothing blocked. `/boost` rewrites come out in English too. |
 | `translate_model` | `sonnet` `haiku` … | Who translates. Sonnet takes about 2–3 s. |
 | `timeout` | seconds (default 25) | Past this, your original prompt goes through. Keep the hook timeout in `settings.json` above it. |
 
-`/boost` covers `level`, `mode`, `model` and `translate`; `style`, `timeout` and
+`/boost` covers `level`, `mode`, `model`, `auto` and `translate`; `style`, `timeout` and
 `translate_model` are edited in the file.
 
 ### Translate every prompt
